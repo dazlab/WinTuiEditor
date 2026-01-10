@@ -1,6 +1,6 @@
 # WinTuiEditor
 
-A native Windows terminal UI (TUI) Text Editor built with .NET and Spectre.Console
+A native Windows terminal UI (TUI) Text Editor built with .NET and [Spectre.Console](https://github.com/spectreconsole/spectre.console)
 
 Windows already has a solid selection of capable text editors. Tools such as [Microsoft Edit](https://github.com/microsoft/edit), [GNU Nano](https://www.nano-editor.org/), and [NeoVim](https://neovim.io/) cover a wide range of use cases, from simple file edits to highly customised workflows. WinTuiEditor is not an attempt to replace any of them.
 
