@@ -10,6 +10,7 @@ notion that it would be really great to have an entire suite of native Windows T
 ## Screenshots
 
 ![WinTuiEditor main screen](screenshots/ui-main.png)
+![WinTuiEditor help overlay](screenshots/ui-help.png)
 
 ## Download
 
