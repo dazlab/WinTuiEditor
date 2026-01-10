@@ -2,14 +2,19 @@
 
 A native Windows terminal UI (TUI) Text Editor built with .NET and Spectre.Console
 
-There are plenty of really good extant Terminal text editors; Microsoft's Edit, GNU Nano, NeoVim et al. So
-why build a new one? Well, for me it's more of a learning opportunity. The sister project WinTuiRss
-came about because I couldn't find any native Windows TUI news reader apps. After building that, I had the
-notion that it would be really great to have an entire suite of native Windows TUI applications. 
+Windows already has a solid selection of capable text editors. Tools such as [Microsoft Edit](https://github.com/microsoft/edit), [GNU Nano](https://www.nano-editor.org/), and [NeoVim](https://neovim.io/) cover a wide range of use cases, from simple file edits to highly customised workflows. WinTuiEditor is not an attempt to replace any of them.
+
+This project started as an exploration of what could be built on Windows using the Spectre.Console library. After completing the sister project [WinTuiRss](https://github.com/dazlab/WinTuiRss), it became clear that modern terminal user interfaces (TUIs) are both viable and under-represented in native Windows tooling.
+
+WinTuiEditor is part of a broader experiment: building a small, cohesive suite of TUI applications designed specifically for Windows users, without relying on Unix-like environments or compatibility layers. The focus is on clean terminal UI design, keyboard-driven interaction, and leveraging modern .NET libraries to produce fast, native console applications.
+
+The goal is practical experimentation, not reinvention — seeing how far a Windows-first TUI approach can be taken, and what kinds of tools it enables.
 
 ## Screenshots
-
+### Main Screen
 ![WinTuiEditor main screen](screenshots/ui-main.png)
+
+### Help Menu
 ![WinTuiEditor help overlay](screenshots/ui-help.png)
 
 ## Download
