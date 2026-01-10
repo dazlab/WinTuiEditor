@@ -1,3 +1,10 @@
+[![License](https://img.shields.io/github/license/dazlab/WinTuiEditor.svg)](LICENSE)
+[![Issues](https://img.shields.io/github/issues/dazlab/WinTuiEditor.svg)](https://github.com/dazlab/WinTuiRss/issues)
+![Downloads](https://img.shields.io/github/downloads/dazlab/WinTuiEditor/total)
+[![Forks](https://img.shields.io/github/forks/dazlab/WinTuiEditor)](https://github.com/dazlab/WinTuiEditor/network/members)
+![Stars](https://img.shields.io/github/stars/dazlab/WinTuiEditor)
+![Watchers](https://img.shields.io/github/watchers/dazlab/WinTuiEditor)
+
 # WinTuiEditor
 
 A native Windows terminal UI (TUI) Text Editor built with .NET and [Spectre.Console](https://github.com/spectreconsole/spectre.console)
