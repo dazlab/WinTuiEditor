@@ -13,6 +13,47 @@ Console.TreatControlCAsInput = true;
 var app = new EditorApp();
 app.Run(args.Length > 0 ? args[0] : null);
 
+// UI / Theming Options
+sealed record Theme(
+    string TitleStyle,          // top title text style
+    string BoldStyle,           // bold text style (foreground)
+    string StatusStyle,         // status bar style
+    string MessageStyleEmpty,   // message bar style when empty
+    string MessageStyleText,    // message bar style when non-empty
+    string SelStyle             // selection style (fg/bg)
+);
+
+static class Themes
+{
+    public static readonly Theme[] Palette =
+    {
+        new Theme(
+            TitleStyle: "bold deepskyblue1",
+            BoldStyle:  "bold deepskyblue1",
+            StatusStyle:"black on grey",
+            MessageStyleEmpty:"grey",
+            MessageStyleText:"yellow",
+            SelStyle:   "black on deepskyblue1"
+        ),
+        new Theme(
+            TitleStyle: "bold springgreen1",
+            BoldStyle:  "bold springgreen1",
+            StatusStyle:"black on darkseagreen2",
+            MessageStyleEmpty:"grey",
+            MessageStyleText:"springgreen1",
+            SelStyle:   "black on springgreen1"
+        ),
+        new Theme(
+            TitleStyle: "bold hotpink",
+            BoldStyle:  "bold hotpink",
+            StatusStyle:"black on plum1",
+            MessageStyleEmpty:"grey",
+            MessageStyleText:"hotpink",
+            SelStyle:   "black on hotpink"
+        ),
+    };
+}
+
 sealed class EditorApp
 {
     private readonly EditorState _s = new();
@@ -84,6 +125,14 @@ sealed class EditorApp
                 if (key.Key == ConsoleKey.F2)
                 {
                     Save();
+                    RequestRender();
+                    continue;
+                }
+                
+                if (key.Key == ConsoleKey.F7)
+                {
+                    _s.NextTheme();
+                    _r.Invalidate();
                     RequestRender();
                     continue;
                 }
@@ -380,7 +429,8 @@ sealed class ScreenRenderer
         _lastSel = default;
     }
     
-    private static string RenderInlineBoldUnderlineWithSelection(string raw, int textW, int selStartVis, int selEndVis)
+    private static string RenderInlineBoldUnderlineWithSelection(
+        string raw, int textW, int selStartVis, int selEndVis, Theme t)
     {
         var sb = new StringBuilder();
         bool bold = false;
@@ -414,13 +464,11 @@ sealed class ScreenRenderer
 
             if (selected)
             {
-                styles.Add("black");
-                styles.Add("on");
-                styles.Add("deepskyblue1");
+                styles.AddRange(t.SelStyle.Split(' ', StringSplitOptions.RemoveEmptyEntries));
             }
             else if (bold)
             {
-                styles.Add("deepskyblue1");
+                styles.AddRange(t.BoldStyle.Split(' ', StringSplitOptions.RemoveEmptyEntries));
             }
 
             string style = string.Join(" ", styles);
@@ -440,7 +488,7 @@ sealed class ScreenRenderer
         {
             bool selected = vis >= selStartVis && vis < selEndVis;
             if (selected)
-                sb.Append("[black on deepskyblue1] [/]");
+                sb.Append('[').Append(t.SelStyle).Append("] [/]");
             else
                 sb.Append(' ');
 
@@ -779,7 +827,7 @@ sealed class ScreenRenderer
     {
         AnsiConsole.Markup(
             $"{Markup.Escape("┌")}{Markup.Escape(_topLeft)}" +
-            $"[bold deepskyblue1]{Markup.Escape(_topTitle)}[/]" +
+            $"[{s.Theme.TitleStyle}]{Markup.Escape(_topTitle)}[/]" +
             $"{Markup.Escape(_topRight)}{Markup.Escape("┐")}"
         );
         return;
@@ -791,14 +839,14 @@ sealed class ScreenRenderer
     if (isStatus)
     {
         var inner = text.Substring(1, innerW);
-        AnsiConsole.Markup($"{Markup.Escape("│")}[black on grey]{Markup.Escape(inner)}[/]{Markup.Escape("│")}");
+        AnsiConsole.Markup($"{Markup.Escape("│")}[{s.Theme.StatusStyle}]{Markup.Escape(inner)}[/]{Markup.Escape("│")}");
         return;
     }
 
     if (isMessage)
     {
         var inner = text.Substring(1, innerW);
-        var style = string.IsNullOrWhiteSpace(inner.Trim()) ? "grey" : "yellow";
+        var style = string.IsNullOrWhiteSpace(inner.Trim()) ? s.Theme.MessageStyleEmpty : s.Theme.MessageStyleText;
         AnsiConsole.Markup($"{Markup.Escape("│")}[{style}]{Markup.Escape(inner)}[/]{Markup.Escape("│")}");
         return;
     }
@@ -884,7 +932,7 @@ sealed class ScreenRenderer
     string c = visible.Substring(selEndVis);
     AnsiConsole.Markup(
         $"{Markup.Escape(prefix)}" +
-        $"{RenderInlineBoldUnderlineWithSelection(raw, textW, selStartVis, selEndVis)}" +
+        RenderInlineBoldUnderlineWithSelection(raw, textW, selStartVis, selEndVis, s.Theme) +
         $"{Markup.Escape(suffix)}"
     );
 }
@@ -1020,6 +1068,9 @@ sealed class ScreenRenderer
 
 sealed class EditorState
 {
+    public int ThemeIndex { get; private set; } = 0;
+    public Theme Theme => Themes.Palette[ThemeIndex];
+    
     private const int MaxHistory = 200;
 
     private readonly Stack<Snapshot> _undo = new();
@@ -1049,6 +1100,12 @@ sealed class EditorState
     public int SelAnchorX { get; private set; }
     public int SelAnchorY { get; private set; }
     public bool HasSelection => SelAnchorX != CursorX || SelAnchorY != CursorY;
+    
+    public void NextTheme()
+    {
+        ThemeIndex = (ThemeIndex + 1) % Themes.Palette.Length;
+        SetMessage($"Theme: {ThemeIndex + 1}/{Themes.Palette.Length}");
+    }
 
     public void ClearSelection()
     {
