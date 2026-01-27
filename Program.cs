@@ -1,25 +1,7 @@
-﻿// Program.cs
-// WinTuiEditor (single-file):
-// - Diff-based rendering
-// - Frame/borders with colored title (title text only)
-// - Line numbers gutter
-// - Right-side scrollbar
-// - Command palette (Ctrl+P) with New file
-// - New file (Ctrl+N) with discard-changes confirmation
-// - Open (Ctrl+O), Save (F2 / Ctrl+Shift+S / Ctrl+S if it arrives), Quit (Ctrl+Q)
-// - Go to line (Ctrl+G)
-// - Undo/Redo (Ctrl+Z / Ctrl+Y) (bounded snapshot history)
-// - Clipboard: copy/cut line + paste (Ctrl+C / Ctrl+X / Ctrl+V) via TextCopy
-// - Shortened status bar + F1 Help overlay (Esc to close)
-// - Help overlay renders on a clean screen (no compositing artifacts)
-// - Renderer cache invalidation after prompts
-// - Live resize redraw + initial paint
-// - Ctrl shortcuts detected via Modifiers OR control-character
-//
-// Dependencies:
-//   dotnet add package Spectre.Console
-//   dotnet add package TextCopy
-
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using Spectre.Console;
@@ -117,19 +99,20 @@ sealed class EditorApp
                 }
 
                 // Ctrl shortcuts (detect via Modifiers OR control-character)
-                if (IsCtrl(key, ConsoleKey.Z, '\u001A')) { _s.Undo();                 RequestRender(); continue; } // Ctrl+Z
-                if (IsCtrl(key, ConsoleKey.Y, '\u0019')) { _s.Redo();                 RequestRender(); continue; } // Ctrl+Y
+                if (IsCtrl(key, ConsoleKey.Z, '\u001A')) { _s.Undo(); RequestRender(); continue; } // Ctrl+Z
+                if (IsCtrl(key, ConsoleKey.Y, '\u0019')) { _s.Redo(); RequestRender(); continue; } // Ctrl+Y
+                if (IsCtrl(key, ConsoleKey.A, '\u0001')) { _s.SelectAll(); RequestRender(); continue; } // Ctrl+A
 
-                if (IsCtrl(key, ConsoleKey.C, '\u0003')) { _s.CopyLineToClipboard();  RequestRender(); continue; } // Ctrl+C
-                if (IsCtrl(key, ConsoleKey.X, '\u0018')) { _s.CutLineToClipboard();   RequestRender(); continue; } // Ctrl+X
-                if (IsCtrl(key, ConsoleKey.V, '\u0016')) { _s.PasteClipboard();       RequestRender(); continue; } // Ctrl+V
+                if (IsCtrl(key, ConsoleKey.C, '\u0003')) { _s.CopyLineToClipboard(); RequestRender(); continue; } // Ctrl+C
+                if (IsCtrl(key, ConsoleKey.X, '\u0018')) { _s.CutLineToClipboard(); RequestRender(); continue; } // Ctrl+X
+                if (IsCtrl(key, ConsoleKey.V, '\u0016')) { _s.PasteClipboard(); RequestRender(); continue; } // Ctrl+V
 
-                if (IsCtrl(key, ConsoleKey.N, '\u000E')) { NewFile();                 RequestRender(); continue; } // Ctrl+N
-                if (IsCtrl(key, ConsoleKey.O, '\u000F')) { OpenPicker();              RequestRender(); continue; } // Ctrl+O
-                if (IsCtrl(key, ConsoleKey.P, '\u0010')) { CommandPalette();          RequestRender(); continue; } // Ctrl+P
-                if (IsCtrl(key, ConsoleKey.S, '\u0013')) { Save();                    RequestRender(); continue; } // Ctrl+S (if delivered)
-                if (IsCtrl(key, ConsoleKey.G, '\u0007')) { GoToLine();                RequestRender(); continue; } // Ctrl+G
-                if (IsCtrl(key, ConsoleKey.Q, '\u0011')) { HandleQuit();              RequestRender(); continue; } // Ctrl+Q
+                if (IsCtrl(key, ConsoleKey.N, '\u000E')) { NewFile(); RequestRender(); continue; } // Ctrl+N
+                if (IsCtrl(key, ConsoleKey.O, '\u000F')) { OpenPicker(); RequestRender(); continue; } // Ctrl+O
+                if (IsCtrl(key, ConsoleKey.P, '\u0010')) { CommandPalette(); RequestRender(); continue; } // Ctrl+P
+                if (IsCtrl(key, ConsoleKey.S, '\u0013')) { Save(); RequestRender(); continue; } // Ctrl+S (if delivered)
+                if (IsCtrl(key, ConsoleKey.G, '\u0007')) { GoToLine(); RequestRender(); continue; } // Ctrl+G
+                if (IsCtrl(key, ConsoleKey.Q, '\u0011')) { HandleQuit(); RequestRender(); continue; } // Ctrl+Q
 
                 _s.QuitArmed = false;
                 _s.HandleKey(key);
@@ -259,6 +242,7 @@ sealed class EditorApp
 
         _s.CursorY = Math.Clamp(line.Value - 1, 0, _s.Lines.Count - 1);
         _s.CursorX = Math.Min(_s.CursorX, _s.Lines[_s.CursorY].Length);
+        _s.ClearSelection();
         _s.SetMessage($"Moved to line {line}");
     }
 
@@ -331,6 +315,10 @@ sealed class ScreenRenderer
     private int _lastRawW, _lastRawH;
     private bool _lastHelpVisible;
 
+    // selection diff tracking (so highlight can update without full repaint)
+    private bool _lastHasSel;
+    private (int ax, int ay, int bx, int by) _lastSel;
+
     // Top border parts for row 0 drawing (title-only color)
     private string _topLeft = "";
     private string _topTitle = "";
@@ -342,6 +330,9 @@ sealed class ScreenRenderer
         _lastRawW = 0;
         _lastRawH = 0;
         _lastHelpVisible = false;
+
+        _lastHasSel = false;
+        _lastSel = default;
     }
 
     public void Render(EditorState s)
@@ -392,6 +383,28 @@ sealed class ScreenRenderer
             textW = Math.Max(1, innerW - gutterW - sepW - scrollW);
         }
 
+        // Selection change: only invalidate potentially affected editor rows
+        bool hasSel = s.HasSelection;
+        var sel = hasSel ? s.GetSelectionRange() : default;
+        bool selChanged = hasSel != _lastHasSel || (hasSel && sel != _lastSel);
+
+        if (selChanged && _lastRows.Length != 0)
+        {
+            InvalidateSelectionRows(
+                s, editorH,
+                _lastHasSel, _lastSel,
+                hasSel, sel
+            );
+
+            _lastHasSel = hasSel;
+            _lastSel = sel;
+        }
+        else
+        {
+            _lastHasSel = hasSel;
+            _lastSel = sel;
+        }
+
         var rows = new string[innerH + 2];
 
         BuildTopBorderParts(innerW, s);
@@ -440,7 +453,7 @@ sealed class ScreenRenderer
         {
             if (!string.Equals(rows[y], _lastRows[y], StringComparison.Ordinal))
             {
-                DrawRow(y, rows[y], innerW, editorH);
+                DrawRow(y, rows[y], innerW, editorH, s, gutterW, textW);
                 _lastRows[y] = rows[y];
             }
         }
@@ -479,7 +492,49 @@ sealed class ScreenRenderer
         _topRight = new string('─', right);
     }
 
-    private void DrawRow(int y, string text, int innerW, int editorH)
+    private void InvalidateSelectionRows(
+        EditorState s,
+        int editorH,
+        bool oldHasSel, (int ax, int ay, int bx, int by) oldSel,
+        bool newHasSel, (int ax, int ay, int bx, int by) newSel)
+    {
+        int startLine = int.MaxValue;
+        int endLine = int.MinValue;
+
+        if (oldHasSel)
+        {
+            startLine = Math.Min(startLine, oldSel.ay);
+            endLine = Math.Max(endLine, oldSel.by);
+        }
+
+        if (newHasSel)
+        {
+            startLine = Math.Min(startLine, newSel.ay);
+            endLine = Math.Max(endLine, newSel.by);
+        }
+
+        if (startLine == int.MaxValue)
+            return;
+
+        int viewStart = s.ScrollTop;
+        int viewEnd = s.ScrollTop + editorH - 1;
+
+        int a = Math.Max(startLine, viewStart);
+        int b = Math.Min(endLine, viewEnd);
+
+        if (a > b)
+            return;
+
+        for (int line = a; line <= b; line++)
+        {
+            int rowInEditor = line - s.ScrollTop; // 0..editorH-1
+            int y = 1 + rowInEditor;              // console row index
+            if (y >= 0 && y < _lastRows.Length)
+                _lastRows[y] = ""; // force redraw of just this row
+        }
+    }
+
+    private void DrawRow(int y, string text, int innerW, int editorH, EditorState s, int gutterW, int textW)
     {
         SafeSetCursor(0, y);
 
@@ -500,17 +555,90 @@ sealed class ScreenRenderer
         {
             var inner = text.Substring(1, innerW);
             AnsiConsole.Markup($"{Markup.Escape("│")}[black on grey]{Markup.Escape(inner)}[/]{Markup.Escape("│")}");
+            return;
         }
-        else if (isMessage)
+
+        if (isMessage)
         {
             var inner = text.Substring(1, innerW);
             var style = string.IsNullOrWhiteSpace(inner.Trim()) ? "grey" : "yellow";
             AnsiConsole.Markup($"{Markup.Escape("│")}[{style}]{Markup.Escape(inner)}[/]{Markup.Escape("│")}");
+            return;
+        }
+
+        // Editor rows (apply selection highlight)
+        int rowInEditor = y - 1;
+        int lineIndex = s.ScrollTop + rowInEditor;
+
+        if (!s.HasSelection || lineIndex < 0 || lineIndex >= s.Lines.Count)
+        {
+            AnsiConsole.Markup(Markup.Escape(text));
+            return;
+        }
+
+        var (ax, ay, bx, by) = s.GetSelectionRange();
+
+        if (lineIndex < ay || lineIndex > by)
+        {
+            AnsiConsole.Markup(Markup.Escape(text));
+            return;
+        }
+
+        // Row layout: "│" + gutter(gutterW) + " " + line(textW) + sb(1) + "│"
+        int lineStart = 1 + gutterW + 1;
+        if (text.Length < lineStart + textW)
+        {
+            AnsiConsole.Markup(Markup.Escape(text));
+            return;
+        }
+
+        string prefix = text.Substring(0, lineStart);
+        string linePart = text.Substring(lineStart, textW);
+        string suffix = text.Substring(lineStart + textW);
+
+        int selStart, selEnd;
+
+        if (ay == by)
+        {
+            selStart = ax;
+            selEnd = bx;
+        }
+        else if (lineIndex == ay)
+        {
+            selStart = ax;
+            selEnd = textW;
+        }
+        else if (lineIndex == by)
+        {
+            selStart = 0;
+            selEnd = bx;
         }
         else
         {
-            AnsiConsole.Markup(Markup.Escape(text));
+            selStart = 0;
+            selEnd = textW;
         }
+
+        selStart = Math.Clamp(selStart, 0, textW);
+        selEnd = Math.Clamp(selEnd, 0, textW);
+
+        if (selEnd <= selStart)
+        {
+            AnsiConsole.Markup(Markup.Escape(text));
+            return;
+        }
+
+        string a = linePart.Substring(0, selStart);
+        string b = linePart.Substring(selStart, selEnd - selStart);
+        string c = linePart.Substring(selEnd);
+
+        AnsiConsole.Markup(
+            $"{Markup.Escape(prefix)}" +
+            $"{Markup.Escape(a)}" +
+            $"[black on deepskyblue1]{Markup.Escape(b)}[/]" +
+            $"{Markup.Escape(c)}" +
+            $"{Markup.Escape(suffix)}"
+        );
     }
 
     private static string BuildStatusInner(EditorState s, int gutterW, int sepW, int scrollW, int textW)
@@ -565,9 +693,13 @@ sealed class ScreenRenderer
             "",
             "Edit",
             "  Ctrl+Z / Ctrl+Y   Undo / Redo",
-            "  Ctrl+C            Copy line",
+            "  Ctrl+A            Select all",
+            "  Ctrl+C            Copy (selection or line)",
             "  Ctrl+X            Cut line",
             "  Ctrl+V            Paste",
+            "",
+            "Selection",
+            "  Shift+Arrows/Home/End/PgUp/PgDn  Extend selection",
             "",
             "Navigation",
             "  Arrows/Home/End, PgUp/PgDn",
@@ -576,24 +708,20 @@ sealed class ScreenRenderer
             "  Esc or F1      Close help"
         };
 
-        // Box sizing
         int innerMaxLine = content.Max(s => s.Length);
-        int boxInnerW = Math.Min(innerMaxLine, rawW - 6);   // leave margins
-        int boxW = boxInnerW + 2;                           // borders
-        int boxH = Math.Min(content.Length + 2, rawH - 4);  // borders + margins
+        int boxInnerW = Math.Min(innerMaxLine, rawW - 6);
+        int boxW = boxInnerW + 2;
+        int boxH = Math.Min(content.Length + 2, rawH - 4);
 
         int x = (rawW - boxW) / 2;
         int y = (rawH - boxH) / 2;
 
-        // Clear the whole screen (help is full-screen mode)
         Console.SetCursorPosition(0, 0);
         Console.Clear();
 
-        // Draw top border
         Console.SetCursorPosition(x, y);
         Console.Write("┌" + new string('─', boxInnerW) + "┐");
 
-        // Draw content lines (clipped)
         int usableLines = boxH - 2;
         for (int i = 0; i < usableLines; i++)
         {
@@ -606,7 +734,6 @@ sealed class ScreenRenderer
             Console.Write("│" + line + "│");
         }
 
-        // Draw bottom border
         Console.SetCursorPosition(x, y + boxH - 1);
         Console.Write("└" + new string('─', boxInnerW) + "┘");
     }
@@ -670,12 +797,56 @@ sealed class EditorState
     public bool QuitArmed { get; set; }
     public bool HelpVisible { get; set; }
 
+    // ===== Selection (MVP) =====
+    public int SelAnchorX { get; private set; }
+    public int SelAnchorY { get; private set; }
+    public bool HasSelection => SelAnchorX != CursorX || SelAnchorY != CursorY;
+
+    public void ClearSelection()
+    {
+        SelAnchorX = CursorX;
+        SelAnchorY = CursorY;
+    }
+
+    public void BeginSelectionIfNone()
+    {
+        if (!HasSelection)
+        {
+            SelAnchorX = CursorX;
+            SelAnchorY = CursorY;
+        }
+    }
+
+    public (int ax, int ay, int bx, int by) GetSelectionRange()
+    {
+        var ax = SelAnchorX; var ay = SelAnchorY;
+        var bx = CursorX; var by = CursorY;
+
+        if (ay < by) return (ax, ay, bx, by);
+        if (ay > by) return (bx, by, ax, ay);
+        return ax <= bx ? (ax, ay, bx, by) : (bx, by, ax, ay);
+    }
+
+    public void SelectAll()
+    {
+        if (Lines.Count == 0) Lines.Add("");
+
+        SelAnchorX = 0;
+        SelAnchorY = 0;
+
+        CursorY = Lines.Count - 1;
+        CursorX = Lines[CursorY].Length;
+
+        SetMessage("Selected all.");
+    }
+
     public int UndoDepth => Math.Max(0, _undo.Count - 1);
     public int RedoDepth => _redo.Count;
 
     public EditorState()
     {
         ClearHistory(seedCurrent: true);
+        ClearSelection();
     }
 
     public void SetMessage(string text, int ms = 2500)
@@ -697,6 +868,7 @@ sealed class EditorState
         Dirty = s.Dirty;
 
         ClampCursor();
+        ClearSelection();
     }
 
     private void PushUndo()
@@ -762,6 +934,7 @@ sealed class EditorState
         QuitArmed = false;
         HelpVisible = false;
 
+        ClearSelection();
         ClearHistory(seedCurrent: true);
     }
 
@@ -784,8 +957,47 @@ sealed class EditorState
         ScrollTop = Math.Clamp(ScrollTop, 0, maxTop);
     }
 
+    public string GetSelectedText()
+    {
+        if (!HasSelection)
+            return "";
+
+        var (ax, ay, bx, by) = GetSelectionRange();
+
+        ay = Math.Clamp(ay, 0, Lines.Count - 1);
+        by = Math.Clamp(by, 0, Lines.Count - 1);
+        ax = Math.Clamp(ax, 0, Lines[ay].Length);
+        bx = Math.Clamp(bx, 0, Lines[by].Length);
+
+        var sb = new StringBuilder();
+
+        if (ay == by)
+        {
+            sb.Append(Lines[ay].Substring(ax, bx - ax));
+            return sb.ToString();
+        }
+
+        sb.AppendLine(Lines[ay].Substring(ax));
+
+        for (int y = ay + 1; y < by; y++)
+            sb.AppendLine(Lines[y]);
+
+        sb.Append(Lines[by].Substring(0, bx));
+        return sb.ToString();
+    }
+
     public void CopyLineToClipboard()
     {
+        if (HasSelection)
+        {
+            var text = GetSelectedText();
+            if (text.Length == 0) { SetMessage("Nothing to copy."); return; }
+
+            ClipboardService.SetText(text);
+            SetMessage("Copied selection.");
+            return;
+        }
+
         if (Lines.Count == 0) { SetMessage("Nothing to copy."); return; }
         var line = Lines[Math.Clamp(CursorY, 0, Lines.Count - 1)];
         ClipboardService.SetText(line);
@@ -809,6 +1021,7 @@ sealed class EditorState
         CursorX = Math.Min(CursorX, Lines[CursorY].Length);
 
         Dirty = true;
+        ClearSelection();
         SetMessage("Cut line.");
     }
 
@@ -817,7 +1030,16 @@ sealed class EditorState
         var text = ClipboardService.GetText() ?? "";
         if (text.Length == 0) { SetMessage("Clipboard empty."); return; }
 
-        PushUndo();
+        if (HasSelection)
+        {
+            DeleteSelection();
+            // DeleteSelection already pushed undo and cleared selection
+            // We'll push undo again only if DeleteSelection did nothing; safe to just continue without extra push.
+        }
+        else
+        {
+            PushUndo();
+        }
 
         text = text.Replace("\r\n", "\n").Replace('\r', '\n');
         var parts = text.Split('\n');
@@ -826,6 +1048,7 @@ sealed class EditorState
         {
             InsertTextCore(parts[0]);
             Dirty = true;
+            ClearSelection();
             SetMessage("Pasted.");
             return;
         }
@@ -846,45 +1069,56 @@ sealed class EditorState
         CursorX = parts[^1].Length;
 
         Dirty = true;
+        ClearSelection();
         SetMessage("Pasted.");
     }
 
     public void HandleKey(ConsoleKeyInfo k)
     {
+        bool shift = (k.Modifiers & ConsoleModifiers.Shift) != 0;
+
         switch (k.Key)
         {
             case ConsoleKey.LeftArrow:
+                if (shift) BeginSelectionIfNone(); else ClearSelection();
                 if (CursorX > 0) CursorX--;
                 else if (CursorY > 0) { CursorY--; CursorX = Lines[CursorY].Length; }
                 break;
 
             case ConsoleKey.RightArrow:
+                if (shift) BeginSelectionIfNone(); else ClearSelection();
                 if (CursorX < Lines[CursorY].Length) CursorX++;
                 else if (CursorY < Lines.Count - 1) { CursorY++; CursorX = 0; }
                 break;
 
             case ConsoleKey.UpArrow:
+                if (shift) BeginSelectionIfNone(); else ClearSelection();
                 if (CursorY > 0) { CursorY--; CursorX = Math.Min(CursorX, Lines[CursorY].Length); }
                 break;
 
             case ConsoleKey.DownArrow:
+                if (shift) BeginSelectionIfNone(); else ClearSelection();
                 if (CursorY < Lines.Count - 1) { CursorY++; CursorX = Math.Min(CursorX, Lines[CursorY].Length); }
                 break;
 
             case ConsoleKey.Home:
+                if (shift) BeginSelectionIfNone(); else ClearSelection();
                 CursorX = 0;
                 break;
 
             case ConsoleKey.End:
+                if (shift) BeginSelectionIfNone(); else ClearSelection();
                 CursorX = Lines[CursorY].Length;
                 break;
 
             case ConsoleKey.PageUp:
+                if (shift) BeginSelectionIfNone(); else ClearSelection();
                 CursorY = Math.Max(0, CursorY - Math.Max(1, Console.WindowHeight - 6));
                 CursorX = Math.Min(CursorX, Lines[CursorY].Length);
                 break;
 
             case ConsoleKey.PageDown:
+                if (shift) BeginSelectionIfNone(); else ClearSelection();
                 CursorY = Math.Min(Lines.Count - 1, CursorY + Math.Max(1, Console.WindowHeight - 6));
                 CursorX = Math.Min(CursorX, Lines[CursorY].Length);
                 break;
@@ -926,6 +1160,7 @@ sealed class EditorState
         QuitArmed = false;
         HelpVisible = false;
 
+        ClearSelection();
         ClearHistory(seedCurrent: true);
     }
 
@@ -940,9 +1175,19 @@ sealed class EditorState
 
     private void InsertText(string s)
     {
+        if (HasSelection)
+        {
+            DeleteSelection(); // PushUndo + Dirty + ClearSelection
+            InsertTextCore(s);
+            Dirty = true;
+            ClearSelection();
+            return;
+        }
+
         PushUndo();
         InsertTextCore(s);
         Dirty = true;
+        ClearSelection();
     }
 
     private void InsertTextCore(string s)
@@ -954,7 +1199,14 @@ sealed class EditorState
 
     private void NewLine()
     {
-        PushUndo();
+        if (HasSelection)
+        {
+            DeleteSelection();
+        }
+        else
+        {
+            PushUndo();
+        }
 
         var line = Lines[CursorY];
         var left = line[..CursorX];
@@ -966,10 +1218,17 @@ sealed class EditorState
         CursorY++;
         CursorX = 0;
         Dirty = true;
+        ClearSelection();
     }
 
     private void Backspace()
     {
+        if (HasSelection)
+        {
+            DeleteSelection();
+            return;
+        }
+
         if (CursorX == 0 && CursorY == 0)
             return;
 
@@ -981,6 +1240,7 @@ sealed class EditorState
             Lines[CursorY] = line.Remove(CursorX - 1, 1);
             CursorX--;
             Dirty = true;
+            ClearSelection();
             return;
         }
 
@@ -996,11 +1256,18 @@ sealed class EditorState
             CursorY--;
             CursorX = newX;
             Dirty = true;
+            ClearSelection();
         }
     }
 
     private void Delete()
     {
+        if (HasSelection)
+        {
+            DeleteSelection();
+            return;
+        }
+
         var line = Lines[CursorY];
         if (CursorX == line.Length && CursorY == Lines.Count - 1)
             return;
@@ -1011,6 +1278,7 @@ sealed class EditorState
         {
             Lines[CursorY] = line.Remove(CursorX, 1);
             Dirty = true;
+            ClearSelection();
             return;
         }
 
@@ -1019,7 +1287,52 @@ sealed class EditorState
             Lines[CursorY] = line + Lines[CursorY + 1];
             Lines.RemoveAt(CursorY + 1);
             Dirty = true;
+            ClearSelection();
         }
+    }
+
+    private void DeleteSelection()
+    {
+        if (!HasSelection)
+            return;
+
+        PushUndo();
+
+        var (ax, ay, bx, by) = GetSelectionRange();
+
+        ay = Math.Clamp(ay, 0, Lines.Count - 1);
+        by = Math.Clamp(by, 0, Lines.Count - 1);
+
+        ax = Math.Clamp(ax, 0, Lines[ay].Length);
+        bx = Math.Clamp(bx, 0, Lines[by].Length);
+
+        if (ay == by && bx <= ax)
+        {
+            ClearSelection();
+            return;
+        }
+
+        if (ay == by)
+        {
+            int count = bx - ax;
+            Lines[ay] = Lines[ay].Remove(ax, count);
+            CursorX = ax;
+            CursorY = ay;
+        }
+        else
+        {
+            var left = Lines[ay].Substring(0, ax);
+            var right = Lines[by].Substring(bx);
+
+            Lines[ay] = left + right;
+            Lines.RemoveRange(ay + 1, by - ay);
+
+            CursorX = ax;
+            CursorY = ay;
+        }
+
+        ClearSelection();
+        Dirty = true;
     }
 }
 
