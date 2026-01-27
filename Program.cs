@@ -51,6 +51,30 @@ static class Themes
             MessageStyleText:"hotpink",
             SelStyle:   "black on hotpink"
         ),
+        new Theme(
+            TitleStyle: "bold gold1",
+            BoldStyle:  "bold gold1",
+            StatusStyle:"black on khaki1",
+            MessageStyleEmpty:"grey",
+            MessageStyleText:"gold1",
+            SelStyle:   "black on gold1"
+        ),
+        new Theme(
+            TitleStyle: "bold mediumorchid1",
+            BoldStyle:  "bold mediumorchid1",
+            StatusStyle:"black on plum1",
+            MessageStyleEmpty:"grey",
+            MessageStyleText:"mediumorchid1",
+            SelStyle:   "black on mediumorchid1"
+        ),
+        new Theme(
+            TitleStyle: "bold lightcoral",
+            BoldStyle:  "bold lightcoral",
+            StatusStyle:"black on lightpink1",
+            MessageStyleEmpty:"grey",
+            MessageStyleText:"lightcoral",
+            SelStyle:   "black on lightcoral"
+        ),
     };
 }
 
@@ -498,15 +522,14 @@ sealed class ScreenRenderer
         return sb.ToString();
     }
 
-    private static string RenderInlineBoldClipped(string raw, int textW)
+    private static string RenderInlineBoldClipped(string raw, int textW, Theme t)
     {
         var sb = new StringBuilder();
         bool bold = false;
         int vis = 0;
 
-        for (int i = 0; i < raw.Length && vis < textW; )
+        for (int i = 0; i < raw.Length && vis < textW;)
         {
-            // toggle on ** (do not render the markers - that would be annoying af)
             if (i + 1 < raw.Length && raw[i] == '*' && raw[i + 1] == '*')
             {
                 bold = !bold;
@@ -514,21 +537,27 @@ sealed class ScreenRenderer
                 continue;
             }
 
+            // optional: if you also want underline markers hidden in the normal renderer
+            if (i + 1 < raw.Length && raw[i] == '_' && raw[i + 1] == '_')
+            {
+                i += 2;
+                continue;
+            }
+
             var ch = Markup.Escape(raw[i].ToString());
-            sb.Append(bold ? $"[bold deepskyblue1]{ch}[/]" : ch);
+            sb.Append(bold ? $"[{t.BoldStyle}]{ch}[/]" : ch);
 
             vis++;
             i++;
         }
 
-        // pad to full width borders/scrollbar line up
         if (vis < textW)
             sb.Append(new string(' ', textW - vis));
 
         return sb.ToString();
     }
     
-    private static string RenderInlineBoldUnderlineClipped(string raw, int textW)
+    private static string RenderInlineBoldUnderlineClipped(string raw, int textW, Theme t)
     {
         var sb = new StringBuilder();
         bool bold = false;
@@ -555,11 +584,10 @@ sealed class ScreenRenderer
 
             var ch = Markup.Escape(raw[i].ToString());
 
-            // build a nested style tag
             if (bold && underline)
-                sb.Append($"[bold underline deepskyblue1]{ch}[/]");
+                sb.Append($"[{t.BoldStyle} underline]{ch}[/]");
             else if (bold)
-                sb.Append($"[bold deepskyblue1]{ch}[/]");
+                sb.Append($"[{t.BoldStyle}]{ch}[/]");
             else if (underline)
                 sb.Append($"[underline]{ch}[/]");
             else
@@ -599,7 +627,7 @@ sealed class ScreenRenderer
         return sb.ToString();
     }
 
-    private static void DrawEditorRowWithBold(string fullRow, int gutterW, int textW)
+    private static void DrawEditorRowWithBold(string fullRow, int gutterW, int textW, Theme t)
     {
         int ls = 1 + gutterW + 1; // "│" + gutter + " "
         if (fullRow.Length < ls + textW)
@@ -612,7 +640,7 @@ sealed class ScreenRenderer
         string lp  = fullRow.Substring(ls, textW);
         string sfx = fullRow.Substring(ls + textW);
 
-        AnsiConsole.Markup($"{Markup.Escape(pfx)}{RenderInlineBoldUnderlineClipped(lp, textW)}{Markup.Escape(sfx)}");
+        AnsiConsole.Markup($"{Markup.Escape(pfx)}{RenderInlineBoldUnderlineClipped(lp, textW, t)}{Markup.Escape(sfx)}");
     }
 
     public void Render(EditorState s)
@@ -858,7 +886,7 @@ sealed class ScreenRenderer
     int ls = 1 + gutterW + 1; // "│" + gutter + " "
     if (text.Length < ls + textW || lineIndex < 0 || lineIndex >= s.Lines.Count)
     {
-        DrawEditorRowWithBold(text, gutterW, textW);
+        DrawEditorRowWithBold(text, gutterW, textW, s.Theme);
         return;
     }
 
@@ -876,14 +904,14 @@ sealed class ScreenRenderer
     // If no selection or this row isn't within selection, render with inline bold
     if (!s.HasSelection)
     {
-        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldUnderlineClipped(raw, textW)}{Markup.Escape(suffix)}");
+        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldUnderlineClipped(raw, textW, s.Theme)}{Markup.Escape(suffix)}");
         return;
     }
 
     var (ax, ay, bx, by) = s.GetSelectionRange();
     if (lineIndex < ay || lineIndex > by)
     {
-        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldUnderlineClipped(raw, textW)}{Markup.Escape(suffix)}");
+        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldUnderlineClipped(raw, textW, s.Theme)}{Markup.Escape(suffix)}");
         return;
     }
 
@@ -922,7 +950,7 @@ sealed class ScreenRenderer
 
     if (selEndVis <= selStartVis)
     {
-        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldUnderlineClipped(raw, textW)}{Markup.Escape(suffix)}");
+        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldUnderlineClipped(raw, textW, s.Theme)}{Markup.Escape(suffix)}");
         return;
     }
 
@@ -1068,7 +1096,7 @@ sealed class ScreenRenderer
 
 sealed class EditorState
 {
-    public int ThemeIndex { get; private set; } = 0;
+    public int ThemeIndex { get; private set; } = 3;
     public Theme Theme => Themes.Palette[ThemeIndex];
     
     private const int MaxHistory = 200;
