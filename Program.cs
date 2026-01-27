@@ -100,6 +100,7 @@ sealed class EditorApp
 
                 // Ctrl shortcuts (detect via Modifiers OR control-character)
                 if (IsCtrl(key, ConsoleKey.B, '\u0002')) { _s.ToggleBoldMarkdown(); RequestRender(); continue; }
+                if (IsCtrl(key, ConsoleKey.U, '\u0015')) { _s.ToggleUnderlineMarkdown(); RequestRender(); continue; }
                 if (IsCtrl(key, ConsoleKey.Z, '\u001A')) { _s.Undo(); RequestRender(); continue; } // Ctrl+Z
                 if (IsCtrl(key, ConsoleKey.Y, '\u0019')) { _s.Redo(); RequestRender(); continue; } // Ctrl+Y
                 if (IsCtrl(key, ConsoleKey.A, '\u0001')) { _s.SelectAll(); RequestRender(); continue; } // Ctrl+A
@@ -311,21 +312,29 @@ static class InlineMarkdown
 {
     public record Parsed(string Plain, int[] BufToVis);
 
-    public static Parsed ParseBold(string raw)
+    public static Parsed Parse(string raw)
     {
         var map = new int[raw.Length + 1];
         var sb = new StringBuilder();
 
-        bool bold = false;
         int vis = 0;
 
         for (int i = 0; i < raw.Length;)
         {
+            // ** (bold marker) -> not visible
             if (i + 1 < raw.Length && raw[i] == '*' && raw[i + 1] == '*')
             {
                 map[i] = vis;
                 map[i + 1] = vis;
-                bold = !bold;
+                i += 2;
+                continue;
+            }
+
+            // __ (underline marker) -> not visible
+            if (i + 1 < raw.Length && raw[i] == '_' && raw[i + 1] == '_')
+            {
+                map[i] = vis;
+                map[i + 1] = vis;
                 i += 2;
                 continue;
             }
@@ -340,6 +349,7 @@ static class InlineMarkdown
         return new Parsed(sb.ToString(), map);
     }
 }
+
 
 sealed class ScreenRenderer
 {
@@ -370,37 +380,153 @@ sealed class ScreenRenderer
         _lastSel = default;
     }
     
-    private static string RenderInlineBoldClipped(string raw, int textW)
-{
-    var sb = new StringBuilder();
-    bool bold = false;
-    int vis = 0;
-
-    for (int i = 0; i < raw.Length && vis < textW; )
+    private static string RenderInlineBoldUnderlineWithSelection(string raw, int textW, int selStartVis, int selEndVis)
     {
-        // toggle on ** (do not render the markers)
-        if (i + 1 < raw.Length && raw[i] == '*' && raw[i + 1] == '*')
+        var sb = new StringBuilder();
+        bool bold = false;
+        bool underline = false;
+        int vis = 0;
+
+        for (int i = 0; i < raw.Length && vis < textW;)
         {
-            bold = !bold;
-            i += 2;
-            continue;
+            // ** toggles bold (not visible)
+            if (i + 1 < raw.Length && raw[i] == '*' && raw[i + 1] == '*')
+            {
+                bold = !bold;
+                i += 2;
+                continue;
+            }
+
+            // __ toggles underline (not visible)
+            if (i + 1 < raw.Length && raw[i] == '_' && raw[i + 1] == '_')
+            {
+                underline = !underline;
+                i += 2;
+                continue;
+            }
+
+            bool selected = vis >= selStartVis && vis < selEndVis;
+
+            var styles = new List<string>(4);
+    
+            if (bold) styles.Add("bold");
+            if (underline) styles.Add("underline");
+
+            if (selected)
+            {
+                styles.Add("black");
+                styles.Add("on");
+                styles.Add("deepskyblue1");
+            }
+            else if (bold)
+            {
+                styles.Add("deepskyblue1");
+            }
+
+            string style = string.Join(" ", styles);
+            string ch = Markup.Escape(raw[i].ToString());
+
+            if (style.Length > 0)
+                sb.Append('[').Append(style).Append(']').Append(ch).Append("[/]");
+            else
+                sb.Append(ch);
+
+            vis++;
+            i++;
         }
 
-        var ch = Markup.Escape(raw[i].ToString());
-        sb.Append(bold ? $"[bold deepskyblue1]{ch}[/]" : ch);
+        // pad to width
+        while (vis < textW)
+        {
+            bool selected = vis >= selStartVis && vis < selEndVis;
+            if (selected)
+                sb.Append("[black on deepskyblue1] [/]");
+            else
+                sb.Append(' ');
 
-        vis++;
-        i++;
+            vis++;
+        }
+
+        return sb.ToString();
     }
 
-    // pad to full width so your borders/scrollbar line up
-    if (vis < textW)
-        sb.Append(new string(' ', textW - vis));
+    private static string RenderInlineBoldClipped(string raw, int textW)
+    {
+        var sb = new StringBuilder();
+        bool bold = false;
+        int vis = 0;
 
-    return sb.ToString();
-}
+        for (int i = 0; i < raw.Length && vis < textW; )
+        {
+            // toggle on ** (do not render the markers - that would be annoying af)
+            if (i + 1 < raw.Length && raw[i] == '*' && raw[i + 1] == '*')
+            {
+                bold = !bold;
+                i += 2;
+                continue;
+            }
 
+            var ch = Markup.Escape(raw[i].ToString());
+            sb.Append(bold ? $"[bold deepskyblue1]{ch}[/]" : ch);
+
+            vis++;
+            i++;
+        }
+
+        // pad to full width borders/scrollbar line up
+        if (vis < textW)
+            sb.Append(new string(' ', textW - vis));
+
+        return sb.ToString();
+    }
     
+    private static string RenderInlineBoldUnderlineClipped(string raw, int textW)
+    {
+        var sb = new StringBuilder();
+        bool bold = false;
+        bool underline = false;
+        int vis = 0;
+
+        for (int i = 0; i < raw.Length && vis < textW; )
+        {
+            // toggle bold on **
+            if (i + 1 < raw.Length && raw[i] == '*' && raw[i + 1] == '*')
+            {
+                bold = !bold;
+                i += 2;
+                continue;
+            }
+
+            // toggle underline on __
+            if (i + 1 < raw.Length && raw[i] == '_' && raw[i + 1] == '_')
+            {
+                underline = !underline;
+                i += 2;
+                continue;
+            }
+
+            var ch = Markup.Escape(raw[i].ToString());
+
+            // build a nested style tag
+            if (bold && underline)
+                sb.Append($"[bold underline deepskyblue1]{ch}[/]");
+            else if (bold)
+                sb.Append($"[bold deepskyblue1]{ch}[/]");
+            else if (underline)
+                sb.Append($"[underline]{ch}[/]");
+            else
+                sb.Append(ch);
+
+            vis++;
+            i++;
+        }
+
+        if (vis < textW)
+            sb.Append(new string(' ', textW - vis));
+
+        return sb.ToString();
+    }
+
     private static string RenderInlineBold(string s)
     {
         var sb = new StringBuilder();
@@ -438,7 +564,7 @@ sealed class ScreenRenderer
         string lp  = fullRow.Substring(ls, textW);
         string sfx = fullRow.Substring(ls + textW);
 
-        AnsiConsole.Markup($"{Markup.Escape(pfx)}{RenderInlineBoldClipped(lp, textW)}{Markup.Escape(sfx)}");
+        AnsiConsole.Markup($"{Markup.Escape(pfx)}{RenderInlineBoldUnderlineClipped(lp, textW)}{Markup.Escape(sfx)}");
     }
 
     public void Render(EditorState s)
@@ -567,7 +693,7 @@ sealed class ScreenRenderer
         int viewY = Math.Clamp(s.CursorY - s.ScrollTop, 0, editorH - 1);
 
         var raw = s.Lines[s.CursorY].Replace('\t', ' ');
-        var parsed = InlineMarkdown.ParseBold(raw);
+        var parsed = InlineMarkdown.Parse(raw);
 
         int bufX = Math.Clamp(s.CursorX, 0, parsed.BufToVis.Length - 1);
         int viewX = Math.Clamp(parsed.BufToVis[bufX], 0, Math.Max(0, textW - 1));
@@ -692,7 +818,7 @@ sealed class ScreenRenderer
     string suffix = text.Substring(ls + textW); // includes scrollbar + trailing border
 
     string raw = s.Lines[lineIndex].Replace('\t', ' ');
-    var parsed = InlineMarkdown.ParseBold(raw);
+    var parsed = InlineMarkdown.Parse(raw);
 
     // Visible line region (no ** markers)
     string visible = parsed.Plain;
@@ -702,14 +828,14 @@ sealed class ScreenRenderer
     // If no selection or this row isn't within selection, render with inline bold
     if (!s.HasSelection)
     {
-        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldClipped(raw, textW)}{Markup.Escape(suffix)}");
+        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldUnderlineClipped(raw, textW)}{Markup.Escape(suffix)}");
         return;
     }
 
     var (ax, ay, bx, by) = s.GetSelectionRange();
     if (lineIndex < ay || lineIndex > by)
     {
-        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldClipped(raw, textW)}{Markup.Escape(suffix)}");
+        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldUnderlineClipped(raw, textW)}{Markup.Escape(suffix)}");
         return;
     }
 
@@ -748,7 +874,7 @@ sealed class ScreenRenderer
 
     if (selEndVis <= selStartVis)
     {
-        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldClipped(raw, textW)}{Markup.Escape(suffix)}");
+        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldUnderlineClipped(raw, textW)}{Markup.Escape(suffix)}");
         return;
     }
 
@@ -756,16 +882,12 @@ sealed class ScreenRenderer
     string a = visible.Substring(0, selStartVis);
     string b = visible.Substring(selStartVis, selEndVis - selStartVis);
     string c = visible.Substring(selEndVis);
-
     AnsiConsole.Markup(
         $"{Markup.Escape(prefix)}" +
-        $"{Markup.Escape(a)}" +
-        $"[black on deepskyblue1]{Markup.Escape(b)}[/]" +
-        $"{Markup.Escape(c)}" +
+        $"{RenderInlineBoldUnderlineWithSelection(raw, textW, selStartVis, selEndVis)}" +
         $"{Markup.Escape(suffix)}"
     );
 }
-
 
     private static string BuildStatusInner(EditorState s, int gutterW, int sepW, int scrollW, int textW)
     {
@@ -980,6 +1102,47 @@ sealed class EditorState
         SetMessage("Bold marker inserted.");
     }
     
+    public void ToggleUnderlineMarkdown()
+    {
+        // If selection exists, wrap/unwrap with __
+        if (HasSelection)
+        {
+            PushUndo();
+
+            var selected = GetSelectedText();
+            if (selected.Length == 0)
+            {
+                SetMessage("Nothing selected.");
+                return;
+            }
+
+            if (selected.StartsWith("__") && selected.EndsWith("__") && selected.Length >= 4)
+            {
+                selected = selected.Substring(2, selected.Length - 4);
+                ReplaceSelectionWith(selected);
+                SetMessage("Underline removed.");
+            }
+            else
+            {
+                ReplaceSelectionWith("__" + selected + "__");
+                SetMessage("Underline applied.");
+            }
+
+            Dirty = true;
+            ClearSelection();
+            return;
+        }
+
+        // No selection: insert ____ and place caret in the middle
+        PushUndo();
+        InsertTextCore("____");
+        CursorX -= 2;
+
+        Dirty = true;
+        ClearSelection();
+        SetMessage("Underline marker inserted.");
+    }
+
     private void ReplaceSelectionWith(string text)
     {
         if (!HasSelection)
