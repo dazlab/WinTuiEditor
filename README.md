@@ -17,7 +17,7 @@ Implemented:
 - Selection rendering, line select editing, SelectAll etc.
 
 ### Theme Switching
-[▶ Watch demo video](screenshots/theme-switching.mp4)
+[Live Theme Switching](screenshots/theme-switching.gif)
 
 ### Bold Text Rendering
 ![WinTuiEditor main screen](screenshots/bold.png)
