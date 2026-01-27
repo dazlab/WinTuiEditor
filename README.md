@@ -11,10 +11,14 @@
 
 ## Current Branch Diffs
 - Implemented Bold text (rendering and markup/saving)
+- Implemented Underline text
 - Implemented Selection rendering, line select editing, SelectAll etc.
 
 ### Bold Text Rendering
 ![WinTuiEditor main screen](screenshots/bold.png)
+
+### Underlined Text Rendering
+![WinTuiEditor main screen](screenshots/underlined.png)
 
 ### Selection
 ![WinTuiEditor main screen](screenshots/line-select.png)
@@ -31,3 +35,4 @@ git clone https://github.com/dazlab/WinTuiEditor.git
 cd WinTuiEditor
 dotnet restore
 dotnet run
+```
