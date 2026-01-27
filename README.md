@@ -1,4 +1,4 @@
-![Header](screenshots/github-header-banner.png)
+![Header](screenshots/github-header-banner-dev.png)
 
 [![License](https://img.shields.io/github/license/dazlab/WinTuiEditor.svg)](LICENSE)
 [![Issues](https://img.shields.io/github/issues/dazlab/WinTuiEditor.svg)](https://github.com/dazlab/WinTuiRss/issues)
