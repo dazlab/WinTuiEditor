@@ -26,17 +26,21 @@ The goal is practical experimentation, not reinvention — seeing how far a Wind
 
 ## Download
 
-Releases are published on the GitHub **Releases** page.
+Download the latest version from the [Releases page](https://github.com/dazlab/WinTuiRss/releases).
 
 ## Requirements
 
 - For development: .NET 8 SDK
 - For running: none if you use the self-contained release build (single EXE)
 
-## Install (from source)
+## Build
 
-```powershell
-git clone https://github.com/dazlab/WinTuiEditor.git
-cd WinTuiEditor
-dotnet restore
-dotnet run
+⚠️ **Important**
+
+The `development` branch contains in-progress work and is intended for preview and testing only.
+You may build and run it to see the latest features, but **errors, crashes, and incomplete behaviour are expected**.
+
+Only tagged releases from the [Releases](https://github.com/dazlab/WinTuiRss/releases) page are guaranteed to build successfully and represent stable, supported versions.
+
+If you want a reliable build, always use a release.
+
