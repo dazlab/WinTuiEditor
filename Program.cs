@@ -99,6 +99,7 @@ sealed class EditorApp
                 }
 
                 // Ctrl shortcuts (detect via Modifiers OR control-character)
+                if (IsCtrl(key, ConsoleKey.B, '\u0002')) { _s.ToggleBoldMarkdown(); RequestRender(); continue; }
                 if (IsCtrl(key, ConsoleKey.Z, '\u001A')) { _s.Undo(); RequestRender(); continue; } // Ctrl+Z
                 if (IsCtrl(key, ConsoleKey.Y, '\u0019')) { _s.Redo(); RequestRender(); continue; } // Ctrl+Y
                 if (IsCtrl(key, ConsoleKey.A, '\u0001')) { _s.SelectAll(); RequestRender(); continue; } // Ctrl+A
@@ -306,6 +307,40 @@ sealed class EditorApp
     }
 }
 
+static class InlineMarkdown
+{
+    public record Parsed(string Plain, int[] BufToVis);
+
+    public static Parsed ParseBold(string raw)
+    {
+        var map = new int[raw.Length + 1];
+        var sb = new StringBuilder();
+
+        bool bold = false;
+        int vis = 0;
+
+        for (int i = 0; i < raw.Length;)
+        {
+            if (i + 1 < raw.Length && raw[i] == '*' && raw[i + 1] == '*')
+            {
+                map[i] = vis;
+                map[i + 1] = vis;
+                bold = !bold;
+                i += 2;
+                continue;
+            }
+
+            map[i] = vis;
+            sb.Append(raw[i]);
+            vis++;
+            i++;
+        }
+
+        map[raw.Length] = vis;
+        return new Parsed(sb.ToString(), map);
+    }
+}
+
 sealed class ScreenRenderer
 {
     private const string AppName = "WinTuiEditor";
@@ -333,6 +368,77 @@ sealed class ScreenRenderer
 
         _lastHasSel = false;
         _lastSel = default;
+    }
+    
+    private static string RenderInlineBoldClipped(string raw, int textW)
+{
+    var sb = new StringBuilder();
+    bool bold = false;
+    int vis = 0;
+
+    for (int i = 0; i < raw.Length && vis < textW; )
+    {
+        // toggle on ** (do not render the markers)
+        if (i + 1 < raw.Length && raw[i] == '*' && raw[i + 1] == '*')
+        {
+            bold = !bold;
+            i += 2;
+            continue;
+        }
+
+        var ch = Markup.Escape(raw[i].ToString());
+        sb.Append(bold ? $"[bold deepskyblue1]{ch}[/]" : ch);
+
+        vis++;
+        i++;
+    }
+
+    // pad to full width so your borders/scrollbar line up
+    if (vis < textW)
+        sb.Append(new string(' ', textW - vis));
+
+    return sb.ToString();
+}
+
+    
+    private static string RenderInlineBold(string s)
+    {
+        var sb = new StringBuilder();
+        bool bold = false;
+
+        for (int i = 0; i < s.Length; i++)
+        {
+            // Detect **
+            if (i + 1 < s.Length && s[i] == '*' && s[i + 1] == '*')
+            {
+                bold = !bold;
+                i++;        // skip second *
+                continue;   // DO NOT RENDER THE **
+            }
+
+            var ch = Markup.Escape(s[i].ToString());
+            sb.Append(bold
+                ? $"[bold deepskyblue1]{ch}[/]"
+                : ch);
+        }
+
+        return sb.ToString();
+    }
+
+    private static void DrawEditorRowWithBold(string fullRow, int gutterW, int textW)
+    {
+        int ls = 1 + gutterW + 1; // "│" + gutter + " "
+        if (fullRow.Length < ls + textW)
+        {
+            AnsiConsole.Markup(Markup.Escape(fullRow));
+            return;
+        }
+
+        string pfx = fullRow.Substring(0, ls);
+        string lp  = fullRow.Substring(ls, textW);
+        string sfx = fullRow.Substring(ls + textW);
+
+        AnsiConsole.Markup($"{Markup.Escape(pfx)}{RenderInlineBoldClipped(lp, textW)}{Markup.Escape(sfx)}");
     }
 
     public void Render(EditorState s)
@@ -459,7 +565,12 @@ sealed class ScreenRenderer
         }
 
         int viewY = Math.Clamp(s.CursorY - s.ScrollTop, 0, editorH - 1);
-        int viewX = Math.Clamp(s.CursorX, 0, Math.Max(0, textW - 1));
+
+        var raw = s.Lines[s.CursorY].Replace('\t', ' ');
+        var parsed = InlineMarkdown.ParseBold(raw);
+
+        int bufX = Math.Clamp(s.CursorX, 0, parsed.BufToVis.Length - 1);
+        int viewX = Math.Clamp(parsed.BufToVis[bufX], 0, Math.Max(0, textW - 1));
 
         int cursorConsoleX = 1 + gutterW + 1 + viewX;
         int cursorConsoleY = 1 + viewY;
@@ -535,111 +646,126 @@ sealed class ScreenRenderer
     }
 
     private void DrawRow(int y, string text, int innerW, int editorH, EditorState s, int gutterW, int textW)
+{
+    SafeSetCursor(0, y);
+
+    if (y == 0)
     {
-        SafeSetCursor(0, y);
-
-        if (y == 0)
-        {
-            AnsiConsole.Markup(
-                $"{Markup.Escape("┌")}{Markup.Escape(_topLeft)}" +
-                $"[bold deepskyblue1]{Markup.Escape(_topTitle)}[/]" +
-                $"{Markup.Escape(_topRight)}{Markup.Escape("┐")}"
-            );
-            return;
-        }
-
-        bool isStatus = (y == 1 + editorH);
-        bool isMessage = (y == 1 + editorH + 1);
-
-        if (isStatus)
-        {
-            var inner = text.Substring(1, innerW);
-            AnsiConsole.Markup($"{Markup.Escape("│")}[black on grey]{Markup.Escape(inner)}[/]{Markup.Escape("│")}");
-            return;
-        }
-
-        if (isMessage)
-        {
-            var inner = text.Substring(1, innerW);
-            var style = string.IsNullOrWhiteSpace(inner.Trim()) ? "grey" : "yellow";
-            AnsiConsole.Markup($"{Markup.Escape("│")}[{style}]{Markup.Escape(inner)}[/]{Markup.Escape("│")}");
-            return;
-        }
-
-        // Editor rows (apply selection highlight)
-        int rowInEditor = y - 1;
-        int lineIndex = s.ScrollTop + rowInEditor;
-
-        if (!s.HasSelection || lineIndex < 0 || lineIndex >= s.Lines.Count)
-        {
-            AnsiConsole.Markup(Markup.Escape(text));
-            return;
-        }
-
-        var (ax, ay, bx, by) = s.GetSelectionRange();
-
-        if (lineIndex < ay || lineIndex > by)
-        {
-            AnsiConsole.Markup(Markup.Escape(text));
-            return;
-        }
-
-        // Row layout: "│" + gutter(gutterW) + " " + line(textW) + sb(1) + "│"
-        int lineStart = 1 + gutterW + 1;
-        if (text.Length < lineStart + textW)
-        {
-            AnsiConsole.Markup(Markup.Escape(text));
-            return;
-        }
-
-        string prefix = text.Substring(0, lineStart);
-        string linePart = text.Substring(lineStart, textW);
-        string suffix = text.Substring(lineStart + textW);
-
-        int selStart, selEnd;
-
-        if (ay == by)
-        {
-            selStart = ax;
-            selEnd = bx;
-        }
-        else if (lineIndex == ay)
-        {
-            selStart = ax;
-            selEnd = textW;
-        }
-        else if (lineIndex == by)
-        {
-            selStart = 0;
-            selEnd = bx;
-        }
-        else
-        {
-            selStart = 0;
-            selEnd = textW;
-        }
-
-        selStart = Math.Clamp(selStart, 0, textW);
-        selEnd = Math.Clamp(selEnd, 0, textW);
-
-        if (selEnd <= selStart)
-        {
-            AnsiConsole.Markup(Markup.Escape(text));
-            return;
-        }
-
-        string a = linePart.Substring(0, selStart);
-        string b = linePart.Substring(selStart, selEnd - selStart);
-        string c = linePart.Substring(selEnd);
-
         AnsiConsole.Markup(
-            $"{Markup.Escape(prefix)}" +
-            $"{Markup.Escape(a)}" +
-            $"[black on deepskyblue1]{Markup.Escape(b)}[/]" +
-            $"{Markup.Escape(c)}" +
-            $"{Markup.Escape(suffix)}"
+            $"{Markup.Escape("┌")}{Markup.Escape(_topLeft)}" +
+            $"[bold deepskyblue1]{Markup.Escape(_topTitle)}[/]" +
+            $"{Markup.Escape(_topRight)}{Markup.Escape("┐")}"
         );
+        return;
     }
+
+    bool isStatus = (y == 1 + editorH);
+    bool isMessage = (y == 1 + editorH + 1);
+
+    if (isStatus)
+    {
+        var inner = text.Substring(1, innerW);
+        AnsiConsole.Markup($"{Markup.Escape("│")}[black on grey]{Markup.Escape(inner)}[/]{Markup.Escape("│")}");
+        return;
+    }
+
+    if (isMessage)
+    {
+        var inner = text.Substring(1, innerW);
+        var style = string.IsNullOrWhiteSpace(inner.Trim()) ? "grey" : "yellow";
+        AnsiConsole.Markup($"{Markup.Escape("│")}[{style}]{Markup.Escape(inner)}[/]{Markup.Escape("│")}");
+        return;
+    }
+
+    // Editor rows
+    int rowInEditor = y - 1;
+    int lineIndex = s.ScrollTop + rowInEditor;
+
+    int ls = 1 + gutterW + 1; // "│" + gutter + " "
+    if (text.Length < ls + textW || lineIndex < 0 || lineIndex >= s.Lines.Count)
+    {
+        DrawEditorRowWithBold(text, gutterW, textW);
+        return;
+    }
+
+    string prefix = text.Substring(0, ls);
+    string suffix = text.Substring(ls + textW); // includes scrollbar + trailing border
+
+    string raw = s.Lines[lineIndex].Replace('\t', ' ');
+    var parsed = InlineMarkdown.ParseBold(raw);
+
+    // Visible line region (no ** markers)
+    string visible = parsed.Plain;
+    if (visible.Length > textW) visible = visible[..textW];
+    else visible = visible.PadRight(textW);
+
+    // If no selection or this row isn't within selection, render with inline bold
+    if (!s.HasSelection)
+    {
+        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldClipped(raw, textW)}{Markup.Escape(suffix)}");
+        return;
+    }
+
+    var (ax, ay, bx, by) = s.GetSelectionRange();
+    if (lineIndex < ay || lineIndex > by)
+    {
+        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldClipped(raw, textW)}{Markup.Escape(suffix)}");
+        return;
+    }
+
+    // Map buffer indices (including ** in raw) to visible indices (without **)
+    int MapBufToVis(int bufIndex)
+    {
+        bufIndex = Math.Clamp(bufIndex, 0, parsed.BufToVis.Length - 1);
+        return Math.Clamp(parsed.BufToVis[bufIndex], 0, textW);
+    }
+
+    int selStartVis, selEndVis;
+
+    if (ay == by)
+    {
+        selStartVis = MapBufToVis(ax);
+        selEndVis = MapBufToVis(bx);
+    }
+    else if (lineIndex == ay)
+    {
+        selStartVis = MapBufToVis(ax);
+        selEndVis = textW;
+    }
+    else if (lineIndex == by)
+    {
+        selStartVis = 0;
+        selEndVis = MapBufToVis(bx);
+    }
+    else
+    {
+        selStartVis = 0;
+        selEndVis = textW;
+    }
+
+    selStartVis = Math.Clamp(selStartVis, 0, textW);
+    selEndVis = Math.Clamp(selEndVis, 0, textW);
+
+    if (selEndVis <= selStartVis)
+    {
+        AnsiConsole.Markup($"{Markup.Escape(prefix)}{RenderInlineBoldClipped(raw, textW)}{Markup.Escape(suffix)}");
+        return;
+    }
+
+    // Selection-highlight rendering (bold is not mixed inside the highlighted segment here)
+    string a = visible.Substring(0, selStartVis);
+    string b = visible.Substring(selStartVis, selEndVis - selStartVis);
+    string c = visible.Substring(selEndVis);
+
+    AnsiConsole.Markup(
+        $"{Markup.Escape(prefix)}" +
+        $"{Markup.Escape(a)}" +
+        $"[black on deepskyblue1]{Markup.Escape(b)}[/]" +
+        $"{Markup.Escape(c)}" +
+        $"{Markup.Escape(suffix)}"
+    );
+}
+
 
     private static string BuildStatusInner(EditorState s, int gutterW, int sepW, int scrollW, int textW)
     {
@@ -815,6 +941,80 @@ sealed class EditorState
             SelAnchorX = CursorX;
             SelAnchorY = CursorY;
         }
+    }
+    
+    public void ToggleBoldMarkdown()
+    {
+        // If selection exists, wrap/unwrap with **
+        if (HasSelection)
+        {
+            PushUndo();
+
+            var selected = GetSelectedText();
+            if (selected.Length == 0) { SetMessage("Nothing selected."); return; }
+
+            if (selected.StartsWith("**") && selected.EndsWith("**") && selected.Length >= 4)
+            {
+                selected = selected.Substring(2, selected.Length - 4);
+                ReplaceSelectionWith(selected);
+                SetMessage("Bold removed.");
+            }
+            else
+            {
+                ReplaceSelectionWith("**" + selected + "**");
+                SetMessage("Bold applied.");
+            }
+
+            Dirty = true;
+            ClearSelection();
+            return;
+        }
+
+        // No selection: insert **** and place caret between the middle **
+        PushUndo();
+        InsertTextCore("****");
+        CursorX -= 2;
+
+        Dirty = true;
+        ClearSelection();
+        SetMessage("Bold marker inserted.");
+    }
+    
+    private void ReplaceSelectionWith(string text)
+    {
+        if (!HasSelection)
+            return;
+
+        var (ax, ay, bx, by) = GetSelectionRange();
+
+        ay = Math.Clamp(ay, 0, Lines.Count - 1);
+        by = Math.Clamp(by, 0, Lines.Count - 1);
+        ax = Math.Clamp(ax, 0, Lines[ay].Length);
+        bx = Math.Clamp(bx, 0, Lines[by].Length);
+
+        if (ay == by)
+        {
+            var line = Lines[ay];
+            Lines[ay] = line.Substring(0, ax) + text + line.Substring(bx);
+            CursorY = ay;
+            CursorX = ax + text.Length;
+            return;
+        }
+
+        var left = Lines[ay].Substring(0, ax);
+        var right = Lines[by].Substring(bx);
+
+        var newText = (left + text + right).Replace("\r\n", "\n").Replace('\r', '\n');
+        var parts = newText.Split('\n').ToList();
+
+        Lines[ay] = parts[0];
+        Lines.RemoveRange(ay + 1, by - ay);
+
+        for (int i = 1; i < parts.Count; i++)
+            Lines.Insert(ay + i, parts[i]);
+
+        CursorY = ay + parts.Count - 1;
+        CursorX = parts[^1].Length - right.Length;
     }
 
     public (int ax, int ay, int bx, int by) GetSelectionRange()
