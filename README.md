@@ -10,9 +10,14 @@
 ## A native Windows terminal UI (TUI) Text Editor built with .NET and [Spectre.Console](https://github.com/spectreconsole/spectre.console)
 
 ## Current Branch Diffs
-- Implemented Bold text (rendering and markup/saving)
-- Implemented Underline text
-- Implemented Selection rendering, line select editing, SelectAll etc.
+Implemented:
+- Theme cycling, along with 7 themes.
+- Bold text (rendering and markup/saving)
+- Underlined text
+- Selection rendering, line select editing, SelectAll etc.
+
+### Theme Switching
+![WinTuiEditor main screen](screenshots/theme-switching.mp4)
 
 ### Bold Text Rendering
 ![WinTuiEditor main screen](screenshots/bold.png)
