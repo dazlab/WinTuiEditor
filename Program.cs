@@ -153,6 +153,14 @@ sealed class EditorApp
                     continue;
                 }
                 
+                if (key.Key == ConsoleKey.F6)
+                {
+                    _s.ToggleLineNumbers();
+                    _r.Invalidate();
+                    RequestRender();
+                    continue;
+                }
+                
                 if (key.Key == ConsoleKey.F7)
                 {
                     _s.NextTheme();
@@ -677,17 +685,22 @@ sealed class ScreenRenderer
         s.EnsureScroll(editorH);
 
         int totalLines = Math.Max(1, s.Lines.Count);
-        int digits = Math.Max(3, totalLines.ToString().Length);
-        int gutterW = digits + 1; // " 12│"
-        int sepW = 1;             // space after gutter
+
+        int digits = s.ShowLineNumbers ? Math.Max(3, totalLines.ToString().Length) : 0;
+        int gutterW = s.ShowLineNumbers ? (digits + 1) : 0; // when on: " 12│"
+        int sepW = 1;             // space after gutter (still keep 1 space before text)
         int scrollW = 1;          // scrollbar column
         int minTextW = 10;
 
         int textW = innerW - gutterW - sepW - scrollW;
+        s.WrapWidth = textW;
         if (textW < minTextW)
         {
-            digits = Math.Max(1, Math.Min(digits, innerW - minTextW - sepW - scrollW - 1));
-            gutterW = digits + 1;
+            if (s.ShowLineNumbers)
+            {
+                digits = Math.Max(1, Math.Min(digits, innerW - minTextW - sepW - scrollW - 1));
+                gutterW = digits + 1;
+            }
             textW = Math.Max(1, innerW - gutterW - sepW - scrollW);
         }
 
@@ -729,11 +742,22 @@ sealed class ScreenRenderer
             if (line.Length > textW) line = line[..textW];
             else if (line.Length < textW) line = line.PadRight(textW);
 
-            string ln = lineIndex < s.Lines.Count ? (lineIndex + 1).ToString() : "";
-            ln = ln.PadLeft(digits).PadRight(digits);
-            string gutter = ln + "│";
+            //string ln = lineIndex < s.Lines.Count ? (lineIndex + 1).ToString() : "";
+            //ln = ln.PadLeft(digits).PadRight(digits);
+            //string gutter = ln + "│";
 
             char sbChar = GetScrollbarChar(sb, i);
+
+            //rows[1 + i] = "│" + gutter + " " + line + sbChar + "│";
+            
+            // NEW STUFF
+            string gutter = "";
+            if (s.ShowLineNumbers)
+            {
+                string ln = lineIndex < s.Lines.Count ? (lineIndex + 1).ToString() : "";
+                ln = ln.PadLeft(digits).PadRight(digits);
+                gutter = ln + "│";
+            }
 
             rows[1 + i] = "│" + gutter + " " + line + sbChar + "│";
         }
@@ -1100,6 +1124,8 @@ sealed class EditorState
     public Theme Theme => Themes.Palette[ThemeIndex];
     
     private const int MaxHistory = 200;
+    
+    public bool ShowLineNumbers { get; private set; } =  true;
 
     private readonly Stack<Snapshot> _undo = new();
     private readonly Stack<Snapshot> _redo = new();
@@ -1111,6 +1137,7 @@ sealed class EditorState
     public int CursorX { get; set; }
     public int CursorY { get; set; }
     public int ScrollTop { get; set; }
+    public int WrapWidth { get; set; } = 0;
 
     public bool Dirty { get; private set; }
     public bool ExitRequested { get; set; }
@@ -1129,6 +1156,54 @@ sealed class EditorState
     public int SelAnchorY { get; private set; }
     public bool HasSelection => SelAnchorX != CursorX || SelAnchorY != CursorY;
     
+    public void ToggleLineNumbers()
+    {
+        ShowLineNumbers = !ShowLineNumbers;
+        SetMessage(ShowLineNumbers ? "Line Numbers: ON" : "Line Numbers: OFF");
+    }
+    
+    private void AutoWrapIfNeeded()
+    {
+        if (WrapWidth <= 0) return;
+        if (Lines.Count == 0) Lines.Add("");
+
+        var line = Lines[CursorY];
+        if (line.Length == 0) return;
+
+        var parsed = InlineMarkdown.Parse(line);
+        int bufX = Math.Clamp(CursorX, 0, parsed.BufToVis.Length - 1);
+        int visX = parsed.BufToVis[bufX];
+
+        if (visX < WrapWidth) return;
+
+        // Find a buffer index where visible column reaches WrapWidth
+        int splitBuf = 0;
+        for (int i = 0; i < parsed.BufToVis.Length; i++)
+        {
+            if (parsed.BufToVis[i] >= WrapWidth)
+            {
+                splitBuf = i;
+                break;
+            }
+        }
+
+        splitBuf = Math.Clamp(splitBuf, 0, line.Length);
+
+        // Split current line and push overflow down
+        var left = line.Substring(0, splitBuf);
+        var right = line.Substring(splitBuf);
+
+        Lines[CursorY] = left;
+
+        if (CursorY == Lines.Count - 1)
+            Lines.Add(right);
+        else
+            Lines.Insert(CursorY + 1, right);
+
+        CursorY++;
+        CursorX = 0;
+    }
+
     public void NextTheme()
     {
         ThemeIndex = (ThemeIndex + 1) % Themes.Palette.Length;
@@ -1643,6 +1718,8 @@ sealed class EditorState
         var line = Lines[CursorY];
         Lines[CursorY] = line.Insert(CursorX, s);
         CursorX += s.Length;
+        
+        AutoWrapIfNeeded(); // Are we at the end of the textW ?
     }
 
     private void NewLine()
