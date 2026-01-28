@@ -11,10 +11,15 @@
 
 ## Current Branch Diffs
 Implemented:
+- Can now Toggle line numbers
 - Theme cycling, along with 7 themes.
 - Bold text (rendering and markup/saving)
 - Underlined text
 - Selection rendering, line select editing, SelectAll etc.
+
+### Toggle Line Numbers
+This takes WinTuiEditor out of the realm of *just* a code editor, and moves it towards
+being a more general text editor.
 
 ### Theme Switching
 ![Live Theme Switching](screenshots/theme-switching.gif)
