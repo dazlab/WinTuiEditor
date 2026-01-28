@@ -9,7 +9,7 @@
 
 ## A native Windows terminal UI (TUI) Text Editor built with .NET and [Spectre.Console](https://github.com/spectreconsole/spectre.console)
 
-## Current Branch Diffs
+## Current Development Branch Diffs with `master`
 Implemented:
 - Can now Toggle line numbers
 - Theme cycling, along with 7 themes.
