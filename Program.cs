@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -1162,6 +1162,13 @@ sealed class EditorState
         SetMessage(ShowLineNumbers ? "Line Numbers: ON" : "Line Numbers: OFF");
     }
     
+    // Helper to fix selection anchor and caret being offset by 1
+    public void CollapseSelectionToCaret()
+    {
+        SelAnchorX = CursorX;
+        SelAnchorY = CursorY;
+    }
+   
     private void AutoWrapIfNeeded()
     {
         if (WrapWidth <= 0) return;
@@ -1615,14 +1622,55 @@ sealed class EditorState
                 break;
 
             case ConsoleKey.UpArrow:
+            {
                 if (shift) BeginSelectionIfNone(); else ClearSelection();
-                if (CursorY > 0) { CursorY--; CursorX = Math.Min(CursorX, Lines[CursorY].Length); }
-                break;
 
-            case ConsoleKey.DownArrow:
-                if (shift) BeginSelectionIfNone(); else ClearSelection();
-                if (CursorY < Lines.Count - 1) { CursorY++; CursorX = Math.Min(CursorX, Lines[CursorY].Length); }
+                if (CursorY > 0)
+                    CursorY--;
+
+                // force consistent whole-line highlight anchor/caret on the current line
+                if (!shift)
+                {
+                    SelAnchorY = CursorY;
+
+                    // anchor at end-of-line, caret at start-of-line = whole-line selection + caret at BO(L)
+                    SelAnchorX = Lines[CursorY].Length;
+                    CursorX = 0;
+                }
+                else
+                {
+                    CursorX = Math.Min(CursorX, Lines[CursorY].Length);
+                }
+
                 break;
+            }
+
+            //case ConsoleKey.DownArrow:
+            //    if (shift) BeginSelectionIfNone(); else ClearSelection();
+            //    if (CursorY < Lines.Count - 1) { CursorY++; CursorX = Math.Min(CursorX, Lines[CursorY].Length); }
+            //    break;
+            case ConsoleKey.DownArrow:
+{
+    if (shift) BeginSelectionIfNone();
+
+    if (CursorY < Lines.Count - 1)
+    {
+        CursorY++;
+        CursorX = Math.Min(CursorX, Lines[CursorY].Length);
+    }
+
+    if (!shift)
+    {
+        // Select the entire current line (so the highlight follows the caret line)
+        SelAnchorY = CursorY;
+        SelAnchorX = 0;
+
+        CursorX = Lines[CursorY].Length; // end of line = whole-line selection
+    }
+
+    break;
+}
+
 
             case ConsoleKey.Home:
                 if (shift) BeginSelectionIfNone(); else ClearSelection();
